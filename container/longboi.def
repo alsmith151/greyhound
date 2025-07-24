@@ -1,0 +1,17 @@
+Bootstrap: localimage
+From: transformers-pytorch-gpu_latest.sif
+
+%post
+    
+    # Install flash-attn separately as it may need special handling
+    pip install packaging ninja --upgrade-strategy only-if-needed
+    MAX_JOBS=12 pip install --upgrade-strategy only-if-needed flash-attn --no-build-isolation
+
+    pip install --upgrade-strategy only-if-needed \
+        borzoi-pytorch \
+        enformer-pytorch \
+        pybigtools \
+        pydantic \
+        loguru \
+        peft \
+        wandb
