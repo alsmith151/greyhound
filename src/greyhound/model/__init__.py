@@ -1,5 +1,5 @@
 from .metrics import compute_metrics
-from .loss import (
+from .losses import (
     multinomial_loss,
     poisson_loss,
     poisson_multinomial_combined_loss,
