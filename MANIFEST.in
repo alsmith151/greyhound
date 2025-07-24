@@ -1,0 +1,22 @@
+# Manifest file for package distribution
+include README.md
+include LICENSE
+include CHANGELOG.md
+include pyproject.toml
+recursive-include src/greyhound *.py
+recursive-include configs *.yaml *.yml
+recursive-include docs *.md *.rst
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.orig
+recursive-exclude * *.rej
+recursive-exclude * *~
+recursive-exclude tests *
+exclude .gitignore
+exclude .pre-commit-config.yaml
+prune .git
+prune .github
+prune .pytest_cache
+prune .mypy_cache
+prune build
+prune dist
