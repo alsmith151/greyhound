@@ -43,7 +43,7 @@ dependencies = [
     # Genomics-specific packages
     "borzoi-pytorch",
     "enformer-pytorch",
-    "pybigtools>=0.4.0",
+    "pybigtools>=0.2.4",
     
     # Data validation and modeling
     "pydantic>=2.0.0",
