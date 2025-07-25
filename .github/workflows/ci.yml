@@ -73,6 +73,7 @@ jobs:
         safety check
 
     - name: Upload Bandit report
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: bandit-report
