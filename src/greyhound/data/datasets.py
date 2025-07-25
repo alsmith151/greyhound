@@ -203,6 +203,7 @@ class ChromatinDataset(Dataset):
         power_transform_exponent: float = 1.0,
         cache_bigwig_handles: bool = True,
         num_workers: int = 4,
+        scale_method: Literal["multiply", "divide"] = "multiply",
     ) -> None:
         """
         Initializes the ChromatinDataset.
@@ -258,6 +259,35 @@ class ChromatinDataset(Dataset):
 
         if not self.bigwig_files:
             raise FileNotFoundError(f"No BigWig files found in {self.bigwig_dir}.")
+
+        # Apply scaling transformation in-place for memory efficiency
+        if self.data is not None:
+            self.scaling_factors = torch.from_numpy(self.data.scaling_factor.values)
+
+            if self.scale_method == "divide":
+                self.scaling_factors = 1 / self.scaling_factors
+
+            self.power_transform_exponent = torch.from_numpy(
+                self.data.power_transform_exponent.values
+            )
+            self.soft_clip = torch.from_numpy(self.data.soft_clip.values)
+            self.hard_clip = torch.from_numpy(self.data.hard_clip.values)
+        else:
+            self.scaling_factors = torch.tensor(
+                [self.scale_factor] * len(self.bigwig_files),
+            )
+            if self.scale_method == "divide":
+                self.scaling_factors = 1 / self.scaling_factors
+
+            self.power_transform_exponent = torch.tensor(
+                [self.power_transform_exponent] * len(self.bigwig_files),
+            )
+            self.soft_clip = torch.tensor(
+                [self.clip_soft] * len(self.bigwig_files),
+            )
+            self.hard_clip = torch.tensor(
+                [self.clip_hard] * len(self.bigwig_files),
+            )
 
         # Pre-allocate common tensors to avoid repeated allocation
         self._setup_tensor_cache()
@@ -506,45 +536,12 @@ class ChromatinDataset(Dataset):
             ).squeeze(0)
             * 32
         )
-
-        # Apply scaling transformation in-place for memory efficiency
-        if self.data is not None:
-            scaling_factors = torch.from_numpy(self.data.scaling_factor.values).to(
-                signal_tensor_binned.device
-            )
-            power_transform_exponent = torch.from_numpy(
-                self.data.power_transform_exponent.values
-            ).to(signal_tensor_binned.device)
-            soft_clip = torch.from_numpy(self.data.soft_clip.values).to(
-                signal_tensor_binned.device
-            )
-            hard_clip = torch.from_numpy(self.data.hard_clip.values).to(
-                signal_tensor_binned.device
-            )
-        else:
-            scaling_factors = torch.tensor(
-                [self.scale_factor] * len(self.bigwig_files),
-                device=signal_tensor_binned.device,
-            )
-            power_transform_exponent = torch.tensor(
-                [self.power_transform_exponent] * len(self.bigwig_files),
-                device=signal_tensor_binned.device,
-            )
-            soft_clip = torch.tensor(
-                [self.clip_soft] * len(self.bigwig_files),
-                device=signal_tensor_binned.device,
-            )
-            hard_clip = torch.tensor(
-                [self.clip_hard] * len(self.bigwig_files),
-                device=signal_tensor_binned.device,
-            )
-
         return self._scale_inplace(
             signal_tensor_binned,
-            scaling_factors,
-            hard_clip,
-            soft_clip,
-            power_transform_exponent,
+            self.scaling_factors,
+            self.hard_clip,
+            self.soft_clip,
+            self.power_transform_exponent,
         )
 
     def __getitem__(self, idx: int) -> dict:
