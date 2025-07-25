@@ -167,7 +167,6 @@ mlruns/
 runs/
 checkpoints/
 models/
-data/
 *.ckpt
 *.pth
 *.pt
