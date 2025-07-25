@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 
+
 def poisson_multinomial_combined_loss(
     y_pred: torch.Tensor,
     y_true: torch.Tensor,

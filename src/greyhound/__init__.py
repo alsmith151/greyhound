@@ -4,5 +4,4 @@ A modern Python package for machine learning model training with Transformers.
 """
 
 from .data import ChromatinDataset
-from .model import GreyhoundConfig, Greyhound, compute_metrics
-
+from .model import Greyhound, GreyhoundConfig, compute_metrics

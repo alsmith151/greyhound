@@ -1,7 +1,7 @@
 # Test configuration and fixtures
+
 import pytest
 import torch
-from pathlib import Path
 
 
 @pytest.fixture

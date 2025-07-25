@@ -26,10 +26,7 @@ class GreyhoundConfig(PretrainedConfig):
         self.borzoi_kwargs = kwargs.get("borzoi_kwargs", {})
         self.id2label = kwargs.get("id2label", None)
         self.label2id = kwargs.get("label2id", None)
-        if self.id2label is not None and self.label2id is not None:
-            assert len(self.id2label) == len(self.label2id), "id2label and label2id must have the same length"
-            assert set(self.id2label.values()) == set(self.label2id.keys()), "id2label and label2id must match"
-        else:
+        if not self.id2label and not self.label2id:
             self.id2label = {i: str(i) for i in range(n_labels)}
             self.label2id = {v: k for k, v in self.id2label.items()}
 
@@ -64,12 +61,11 @@ class Greyhound(PreTrainedModel):
         Args:
             path (Union[str, Path]): Path to the directory containing Borzoi weights.
         """
-        pretrained = Borzoi.from_pretrained(self.config.borzoi_model_name)      
+        pretrained = Borzoi.from_pretrained(self.config.borzoi_model_name)
         self.borzoi.load_state_dict(pretrained.state_dict(), strict=True)
         print(
             f"Loaded Borzoi weights from {self.config.borzoi_model_name} into Greyhound model."
         )
-
 
     def forward(self, input_ids=None, labels=None, **kwargs):
         """
@@ -84,7 +80,7 @@ class Greyhound(PreTrainedModel):
             Optional[torch.Tensor]: Loss if labels are provided.
         """
 
-        with torch.amp.autocast('cuda', enabled=self.config.use_autocast):
+        with torch.amp.autocast("cuda", enabled=self.config.use_autocast):
             x = input_ids
             x = self.borzoi.get_embs_after_crop(x)
             x = self.borzoi.final_joined_convs(x)
@@ -102,4 +98,3 @@ class Greyhound(PreTrainedModel):
             else:
                 loss = poisson_multinomial_combined_loss(logits, labels)
         return logits if loss is None else (loss, logits)
-

@@ -1,7 +1,8 @@
-
 import torch
 from transformers import EvalPrediction
-from .losses import poisson_loss, multinomial_loss, poisson_multinomial_combined_loss
+
+from .losses import multinomial_loss, poisson_loss, poisson_multinomial_combined_loss
+
 
 def compute_metrics(eval_pred: EvalPrediction) -> dict[str, float]:
     """

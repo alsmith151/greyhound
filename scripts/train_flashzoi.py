@@ -1,55 +1,29 @@
 import os
 
-os.environ["HF_HOME"] = (
-    "/ceph/project/milne_group/asmith/Projects/2025-05-30-long-boi/cache"
-)
+os.environ[
+    "HF_HOME"
+] = "/ceph/project/milne_group/asmith/Projects/2025-05-30-long-boi/cache"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-import pathlib
-import subprocess
 import sys
 from datetime import datetime
 from functools import partial
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import polars as pl
-import pybigtools
-import ray
-import torch
-import tqdm
-from borzoi_pytorch import Borzoi
-from loguru import logger
-from peft import LoraConfig, get_peft_model
-from pydantic import BaseModel, Field
-from transformers import (
-    EarlyStoppingCallback,
-    EvalPrediction,
-    Trainer,
-    TrainerCallback,
-    TrainerControl,
-    TrainerState,
-    TrainingArguments,
-)
 
 import wandb
+from peft import LoraConfig, get_peft_model
+from transformers import EarlyStoppingCallback, Trainer, TrainingArguments
 
 os.chdir("/home/a/asmith/project_milne_group/Projects/2025-05-30-long-boi/")
 sys.path.append("/ceph/project/milne_group/asmith/Projects/2025-05-30-long-boi")
+from src.callbacks import SaveMergedModelCallback
 from src.datasets import (
     ChromatinDataset,
     GenomeIntervalDataset,
     test_filter,
-    toy_filter,
     train_filter,
     val_filter,
 )
-from src.loss import multinomial_loss, poisson_loss, poisson_multinomial_combined_loss
 from src.metrics import compute_metrics
-from src.model import LongBoiConfig, LongBoi
-from src.callbacks import SaveMergedModelCallback
+from src.model import LongBoi, LongBoiConfig
 
 BED_FILE = "/ceph/project/milne_group/asmith/Projects/2025-05-30-long-boi/data/sequences_human.bed.gz"
 FASTA_FILE = "/project/milne_group/shared/seqnado_reference/hg38/UCSC/sequence/hg38.fa"
@@ -60,7 +34,7 @@ BIGWIG_DIR = "/ceph/project/milne_group/asmith/Projects/2025-05-30-long-boi/data
 # DATASET PREPARATION
 ########################
 
-genome_datasets = dict()
+genome_datasets = {}
 for dataset in {"train": train_filter, "val": val_filter, "test": test_filter}.items():
     name, filter_func = dataset
 
@@ -82,7 +56,7 @@ for dataset in {"train": train_filter, "val": val_filter, "test": test_filter}.i
     )
 
 
-chromatin_dataset = dict()
+chromatin_dataset = {}
 for name, dataset in genome_datasets.items():
     chromatin_dataset[name] = ChromatinDataset(
         genome_dataset=dataset,
@@ -106,7 +80,7 @@ model_config = LongBoiConfig(
     label2id=chromatin_dataset["train"].label2id,
     borzoi_kwargs={
         "enable_mouse_head": False,
-    }
+    },
 )
 model = LongBoi(config=model_config)
 model.init_borzoi_weights()

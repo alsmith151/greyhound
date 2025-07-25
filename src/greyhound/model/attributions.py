@@ -1,18 +1,18 @@
-import torch
+from collections import defaultdict
+from collections.abc import Callable
+
 import numpy as np
 import pandas as pd
 import polars as pl
-from collections import defaultdict
-from typing import Dict, List
+import torch
 from loguru import logger
-from enformer_pytorch import GenomeIntervalDataset
-from typing import Callable, Dict, DefaultDict, List
 
 from greyhound.data import GenomicRegion
 
 
-
-def gradient_x_input(model: Callable, X: torch.Tensor, target: int, bins: List[int] = None) -> torch.Tensor:
+def gradient_x_input(
+    model: Callable, X: torch.Tensor, target: int, bins: list[int] = None
+) -> torch.Tensor:
     """
     Computes Gradient x Input attributions for a single input and target class.
 
@@ -42,12 +42,12 @@ def gradient_x_input(model: Callable, X: torch.Tensor, target: int, bins: List[i
             grad_outputs=torch.ones_like(out_target),
             retain_graph=False,
             create_graph=False,
-        )[0]  # shape: (1, 4, L)
+        )[
+            0
+        ]  # shape: (1, 4, L)
 
     grad_x_input = grads * X  # (1, 4, L)
     return grad_x_input
-
-
 
 
 class LongBoiGenomicConverter:
@@ -125,9 +125,13 @@ class LongBoiGenomicConverter:
         """
         # Ensure attributions are on CPU and convert to numpy
         attributions = attributions.cpu().numpy().squeeze()  # shape (1, L) -> (L,)
-        assert (
-            attributions.ndim == 1
-        ), "Attributions should be a 1D tensor after combining basepair attributions."
+        if attributions.ndim != 1:
+            logger.error(
+                "Attributions should be a 1D tensor after combining basepair attributions."
+            )
+            raise ValueError(
+                "Attributions should be a 1D tensor after combining basepair attributions."
+            )
 
         # Get the start and end positions from the genome interval dataset
         roi_start = self.gid.df[index]["column_2"].item()
@@ -159,7 +163,7 @@ class LongBoiGenomicConverter:
         self,
         region: GenomicRegion,
         bin_size: int = None,
-    ) -> Dict[int, List[int]]:
+    ) -> dict[int, list[int]]:
         """
         Find the indices of the bins that overlap with a given genomic region.
 
@@ -205,8 +209,6 @@ class LongBoiGenomicConverter:
                 f"No overlapping regions found for {region.chromosome}:{region.start}-{region.end}"
             )
             return {}
-        
-        
 
         return bin_indices
 

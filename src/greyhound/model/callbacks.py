@@ -1,5 +1,10 @@
-from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
 from loguru import logger
+from transformers import (
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
+    TrainingArguments,
+)
 
 
 class SaveMergedModelCallback(TrainerCallback):
