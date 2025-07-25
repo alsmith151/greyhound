@@ -264,9 +264,8 @@ class ChromatinDataset(Dataset):
         if self.data is not None:
             self.scaling_factors = torch.from_numpy(self.data.scaling_factor.values)
 
-            if self.scale_method == "divide":
+            if scale_method == "divide":
                 self.scaling_factors = 1 / self.scaling_factors
-
             self.power_transform_exponent = torch.from_numpy(
                 self.data.power_transform_exponent.values
             )
@@ -276,7 +275,7 @@ class ChromatinDataset(Dataset):
             self.scaling_factors = torch.tensor(
                 [self.scale_factor] * len(self.bigwig_files),
             )
-            if self.scale_method == "divide":
+            if scale_method == "divide":
                 self.scaling_factors = 1 / self.scaling_factors
 
             self.power_transform_exponent = torch.tensor(
