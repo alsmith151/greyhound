@@ -39,6 +39,7 @@ dependencies = [
     "torch>=2.0.0",
     "transformers>=4.30.0",
     "peft>=0.4.0",
+    "flash_attn>=2.0.0",
 
     # Genomics-specific packages
     "borzoi-pytorch",

@@ -191,6 +191,7 @@ class DataSources(pa.DataFrameModel):
     )
 
 
+
 class ChromatinDataset(Dataset):
     def __init__(
         self,
@@ -201,365 +202,107 @@ class ChromatinDataset(Dataset):
         clip_hard: int = 128,
         scale_factor: float = 2.0,
         power_transform_exponent: float = 1.0,
-        cache_bigwig_handles: bool = True,
+        cache_bigwig_handles: bool = False,
         num_workers: int = 4,
         scale_method: Literal["multiply", "divide"] = "multiply",
-    ) -> None:
-        """
-        Initializes the ChromatinDataset.
-        Args:
-            genome_dataset (GenomeIntervalDataset): The genome dataset containing genomic regions.
-            bigwig_dir (Union[str, Path]): Directory containing BigWig files.
-            clip_soft (int, optional): Soft clipping value. Defaults to 32.
-            clip_hard (int, optional): Hard clipping value. Defaults to 128.
-            scale_factor (float, optional): Scaling factor for the signal. Defaults to 2.0.
-            power_transform_exponent (float, optional): Exponent for power transformation. Defaults to 1.0.
-            cache_bigwig_handles (bool, optional): Whether to cache BigWig file handles. Defaults to True.
-            num_workers (int, optional): Number of worker threads for BigWig extraction. Defaults to 4.
-        """
+    ):
         self.genome_dataset = genome_dataset
         self.clip_soft = clip_soft
         self.clip_hard = clip_hard
         self.scale_factor = scale_factor
         self.power_transform_exponent = power_transform_exponent
-        self.cache_bigwig_handles = cache_bigwig_handles
-        self.num_workers = num_workers
         self.min_value = torch.finfo(torch.float16).min
         self.max_value = torch.finfo(torch.float16).max
+        self.num_workers = num_workers
 
-        # Thread-local storage for BigWig handles to avoid conflicts in multiprocessing
+        # Thread-local data
         self._thread_local = threading.local()
 
+        # Cache handles only if single-worker (safe)
+        self.cache_bigwig_handles = cache_bigwig_handles and num_workers == 0
+        if cache_bigwig_handles and num_workers > 0:
+            logger.warning("Disabling cache_bigwig_handles because multiple workers are used.")
+
+        # Load BigWig metadata
         if data is not None:
-            try:
-                self.data = DataSources.validate(data)
-            except pa.errors.SchemaError as e:
-                logger.error(f"Data validation failed: {e}")
-                raise e
-
+            self.data = data
             self.bigwig_files = self.data.path.tolist()
-
         else:
             if bigwig_dir is None:
                 raise ValueError("Either 'data' or 'bigwig_dir' must be provided.")
+            self.bigwig_dir = Path(bigwig_dir).resolve()
+            self.bigwig_files = list(self.bigwig_dir.glob("*.bw")) + list(self.bigwig_dir.glob("*.bigWig"))
             self.data = None
-            self.bigwig_dir = Path(bigwig_dir)
-            if not self.bigwig_dir.exists():
-                raise FileNotFoundError(
-                    f"BigWig directory {self.bigwig_dir} does not exist."
-                )
-            if not self.bigwig_dir.is_dir():
-                raise NotADirectoryError(
-                    f"BigWig directory {self.bigwig_dir} is not a directory."
-                )
-            self.bigwig_dir = self.bigwig_dir.resolve()
-            self.bigwig_files = list(self.bigwig_dir.glob("*.bw")) + list(
-                self.bigwig_dir.glob("*.bigWig")
-            )
 
         if not self.bigwig_files:
-            raise FileNotFoundError(f"No BigWig files found in {self.bigwig_dir}.")
+            raise FileNotFoundError("No BigWig files found.")
 
-        # Apply scaling transformation in-place for memory efficiency
+        # Scaling and clipping tensors
         if self.data is not None:
             self.scaling_factors = torch.from_numpy(self.data.scaling_factor.values)
-
-            if scale_method == "divide":
-                self.scaling_factors = 1 / self.scaling_factors
-            self.power_transform_exponent = torch.from_numpy(
-                self.data.power_transform_exponent.values
-            )
+            self.power_transform_exponent = torch.from_numpy(self.data.power_transform_exponent.values)
             self.soft_clip = torch.from_numpy(self.data.soft_clip.values)
             self.hard_clip = torch.from_numpy(self.data.hard_clip.values)
         else:
+            n = len(self.bigwig_files)
             self.scaling_factors = torch.tensor(
-                [self.scale_factor] * len(self.bigwig_files),
+                [self.scale_factor] * n
             )
-            if scale_method == "divide":
-                self.scaling_factors = 1 / self.scaling_factors
-
             self.power_transform_exponent = torch.tensor(
-                [self.power_transform_exponent] * len(self.bigwig_files),
+                [self.power_transform_exponent] * n
             )
-            self.soft_clip = torch.tensor(
-                [self.clip_soft] * len(self.bigwig_files),
-            )
-            self.hard_clip = torch.tensor(
-                [self.clip_hard] * len(self.bigwig_files),
-            )
+            self.soft_clip = torch.tensor([self.clip_soft] * n)
+            self.hard_clip = torch.tensor([self.clip_hard] * n)
 
-        # Pre-allocate common tensors to avoid repeated allocation
-        self._setup_tensor_cache()
-
-        # Pre-format chromosome names to avoid repeated string operations
-        self._preprocess_chromosome_names()
-
+        if scale_method == "divide":
+            self.scaling_factors = 1 / self.scaling_factors
+    
     @classmethod
-    def from_csv(cls, csv_file: str | Path, **kwargs) -> "ChromatinDataset":
+    def from_csv(
+        cls,
+        csv_file: str | Path,
+        **kwargs) -> "ChromatinDataset":
         """
-        Create a ChromatinDataset from a CSV file containing data sources.
+        Create a ChromatinDataset from a CSV file.
+
         Args:
-            csv_file (str | Path): Path to the CSV file.
-            **kwargs: Additional arguments for ChromatinDataset initialization.
+            csv_file (str | Path): Path to the CSV file containing metadata.
+            **kwargs: Additional parameters for ChromatinDataset initialization.
+
         Returns:
-            ChromatinDataset: An instance of ChromatinDataset.
+            ChromatinDataset: Initialized dataset instance.
         """
         df = pd.read_csv(csv_file)
-        return cls(data=df, **kwargs)
-
-    def _preprocess_chromosome_names(self):
+        data = DataSources.validate(df)
+        return cls(data=data, **kwargs)
+    
+    @property
+    def params(self) -> dict[str, Any]:
         """
-        Pre-process chromosome names in the dataset to avoid repeated string operations
-        during __getitem__ calls. This can provide significant speedup.
+        Get the parameters of the dataset as a dictionary.
+        
+        Returns:
+            dict[str, Any]: Dictionary containing dataset parameters.
         """
-        if hasattr(self.genome_dataset.df, "with_columns"):
-            # For polars DataFrame - ensure chromosome names are UCSC format
-            try:
-                self.genome_dataset.df = self.genome_dataset.df.with_columns(
-                    [
-                        pl.when(pl.col("column_1").str.starts_with("chr"))
-                        .then(pl.col("column_1"))
-                        .otherwise(pl.concat_str([pl.lit("chr"), pl.col("column_1")]))
-                        .alias("column_1")
-                    ]
-                )
-            except Exception as e:
-                logger.error(
-                    "Failed to preprocess chromosome names in polars DataFrame."
-                )
-                raise ValueError(
-                    "Ensure 'column_1' contains chromosome names in UCSC format."
-                ) from e
-
-    def _setup_tensor_cache(self):
-        """Setup tensor cache and thread-local BigWig handles."""
-        pass  # Will be implemented if needed
-
-    def _get_bigwig_handles(self):
-        """Get thread-local BigWig handles for efficient access."""
-        if not hasattr(self._thread_local, "bigwig_handles"):
-            if self.cache_bigwig_handles:
-                self._thread_local.bigwig_handles = [
-                    pybigtools.open(str(bigwig_file))
-                    for bigwig_file in self.bigwig_files
-                ]
-            else:
-                self._thread_local.bigwig_handles = None
-        return self._thread_local.bigwig_handles
+        return {
+            'scaling_factors': self.scaling_factors,
+            'soft_clip': self.soft_clip,
+            'hard_clip': self.hard_clip,
+            'power_transform_exponent': self.power_transform_exponent,
+            'n_labels': self.n_labels,
+            'n_samples': len(self),
+            'region_length': self.genome_dataset.fasta.context_length,
+            'bigwig_files': self.bigwig_files,
+            'data' : self.data,
+        }
 
     def __len__(self):
         return len(self.genome_dataset)
 
-    @property
-    def params(self) -> dict[str, Any]:
-        """
-        Returns the parameters of the dataset as a dictionary.
-        """
-        return {
-            "clip_soft": self.clip_soft,
-            "clip_hard": self.clip_hard,
-            "scale_factor": self.scale_factor,
-            "power_transform_exponent": self.power_transform_exponent,
-            "bigwigs": str(self.bigwig_files),
-            "fasta_file": str(self.genome_dataset.fasta.seqs.filename),
-            "context_length": self.genome_dataset.fasta.context_length,
-        }
-
-    def _reinit_fasta_reader(self):
-        """
-        Re-initializes the FastaInterval reader only if needed.
-
-        This is necessary because pyfaidx and torch multiprocessing are not compatible.
-        Optimized to avoid unnecessary reinitialization.
-        """
-        if (
-            not hasattr(self._thread_local, "fasta_initialized")
-            or not self._thread_local.fasta_initialized
-        ):
-            self.genome_dataset.fasta = FastaInterval(
-                fasta_file=self.genome_dataset.fasta.seqs.filename,
-                context_length=self.genome_dataset.fasta.context_length,
-                return_seq_indices=self.genome_dataset.fasta.return_seq_indices,
-                shift_augs=self.genome_dataset.fasta.shift_augs,
-                rc_aug=self.genome_dataset.fasta.rc_aug,
-            )
-            self._thread_local.fasta_initialized = True
-
-    def _scale(
-        self,
-        x: torch.Tensor,
-        hard_clip: int = 128,
-        soft_clip: int = 32,
-        scale_factor: float = 2.0,
-        power_transform_exponent: float = 1,
-    ) -> torch.Tensor:
-        """
-        Applies squashed scaling transformation to input profiles.
-        Forward transformation corresponding to undo_squashed_scale.
-
-        Args:
-            x (torch.Tensor): Input tensor to transform
-            scale (bool): Apply scaling (default: True)
-
-        Returns:
-            torch.Tensor: Transformed tensor
-        """
-
-        # Transform order: scale → power → clip
-        x.mul_(scale_factor)
-
-        # Power transform with offset
-        x.add_(1).pow_(power_transform_exponent).sub_(1)
-
-        # Soft clipping with offset handling
-        mask = x > soft_clip
-        if mask.any():
-            excess = x[mask] - soft_clip + 1
-            x[mask] = torch.sqrt(excess) + soft_clip - 1
-
-        # Hard clipping
-        x.clamp_(min=-hard_clip, max=hard_clip)
-        # Ensure values are within the specified range
-        x.clamp_(min=self.min_value, max=self.max_value)
-        return x
-
-    def _scale_inplace(
-        self,
-        x: torch.Tensor,
-        scaling_factors: torch.Tensor,
-        hard_clip: torch.Tensor,
-        soft_clip: torch.Tensor,
-        power_transform_exponent: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Optimized in-place scaling transformation to reduce memory allocations.
-
-        Args:
-            x (torch.Tensor): Input tensor to transform
-            scaling_factors (torch.Tensor): Scaling factors for each element
-            hard_clip (torch.Tensor): Hard clipping values for each element
-            soft_clip (torch.Tensor): Soft clipping values for each element
-            power_transform_exponent (torch.Tensor): Power transform exponents for each element
-        Returns:
-            torch.Tensor: Transformed tensor (same object, modified in-place)
-        """
-        # Transform order: scale → power → clip (all in-place)
-        # Reshape scaling parameters for broadcasting across tracks (dim 0)
-        scaling_factors = scaling_factors.unsqueeze(1)  # (num_tracks, 1)
-        power_transform_exponent = power_transform_exponent.unsqueeze(
-            1
-        )  # (num_tracks, 1)
-        soft_clip = soft_clip.unsqueeze(1)  # (num_tracks, 1)
-        hard_clip = hard_clip.unsqueeze(1)  # (num_tracks, 1)
-
-        x.mul_(scaling_factors)
-
-        # Power transform with offset (in-place)
-        x.add_(1).pow_(power_transform_exponent).sub_(1)
-
-        # Soft clipping with offset handling (in-place where possible)
-        mask = x > soft_clip
-        if mask.any():
-            # Handle soft clipping with proper broadcasting
-            excess = x - soft_clip + 1
-            clipped_values = torch.sqrt(excess) + soft_clip - 1
-            x = torch.where(mask, clipped_values, x)
-
-        # Hard clipping and range enforcement (in-place)
-        x.clamp_(min=-hard_clip, max=hard_clip)
-        x.clamp_(min=self.min_value, max=self.max_value)
-
-        return x
-
-    def _extract_from_bigwig(
-        self, coordinates: FastGenomicRegion | GenomicRegion
-    ) -> list:
-        """
-        Extract BigWig data using cached handles for better performance.
-
-        Args:
-            coordinates: Object with chromosome, start, end attributes
-
-        Returns:
-            list: List of extracted values from each BigWig file
-        """
-        bigwig_handles = self._get_bigwig_handles()
-
-        if bigwig_handles is not None:
-            # Use cached handles for much faster access
-            return [
-                handle.values(
-                    coordinates.chromosome, coordinates.start, coordinates.end
-                )
-                for handle in bigwig_handles
-            ]
-        else:
-            # Fallback to opening files each time (slower but lower memory)
-            return [
-                pybigtools.open(str(bigwig_file)).values(
-                    coordinates.chromosome,
-                    coordinates.start,
-                    coordinates.end,
-                )
-                for bigwig_file in self.bigwig_files
-            ]
-
-    def _extract_data(
-        self, coordinates: FastGenomicRegion | GenomicRegion
-    ) -> torch.Tensor:
-        """
-        Extracts data from BigWig files for the given genomic coordinates.
-        Optimized for performance with minimal tensor operations.
-
-        Args:
-            coordinates (GenomicRegion): The genomic coordinates to extract data for.
-
-        Returns:
-            torch.Tensor: A tensor containing the extracted data with shape (num_tracks, sequence_length)
-                        suitable for Borzoi model training.
-        """
-        # Extract all BigWig data using optimized method
-        signal = self._extract_from_bigwig(coordinates)
-
-        # Single vectorized conversion to tensor with optimized dtype
-        signal_array = np.array(signal, dtype=np.float32)
-        signal_tensor = torch.from_numpy(signal_array)
-
-        # Replace NaN values efficiently
-        signal_tensor = torch.nan_to_num(signal_tensor)
-
-        # Perform binning operation more efficiently
-        signal_tensor_binned = (
-            torch.nn.functional.avg_pool1d(
-                signal_tensor.unsqueeze(0), kernel_size=32, stride=32
-            ).squeeze(0)
-            * 32
-        )
-        return self._scale_inplace(
-            signal_tensor_binned,
-            self.scaling_factors,
-            self.hard_clip,
-            self.soft_clip,
-            self.power_transform_exponent,
-        )
-
-    def __getitem__(self, idx: int) -> dict:
-        """
-        Gets the item at the given index with maximum performance optimization.
-
-        Args:
-            idx (int): The index of the item.
-
-        Returns:
-            dict: Dictionary containing 'input_ids' and 'label_ids' tensors.
-        """
-        # Only reinitialize FASTA reader if needed (per-thread, not per-call)
-        self._reinit_fasta_reader()
-
-        # Get coordinates directly from DataFrame for efficiency
+    def __getitem__(self, idx):
+        self._ensure_fasta_initialized()
         row = self.genome_dataset.df[idx]
 
-        # Use lightweight coordinate class - no validation overhead!
         coordinates = FastGenomicRegion(
             chromosome=row["column_1"].item(),
             start=row["column_2"].item(),
@@ -567,52 +310,119 @@ class ChromatinDataset(Dataset):
             strand="+",
         )
 
-        # Extract data and inputs efficiently
         targets = self._extract_data(coordinates)
         inputs, _, rc_augs = self.genome_dataset[idx]
 
-        # Handle reverse complement efficiently
-        if rc_augs[0]:  # If input is reverse complemented
+        if rc_augs[0]:  # reverse complemented
             targets = torch.flip(targets, dims=[1])
 
-        # Transpose inputs once (avoid multiple tensor operations)
-        inputs = inputs.permute(1, 0)  # Change to (C, N, L)
+        inputs = inputs.permute(1, 0)
 
         return {
             "input_ids": inputs,
             "label_ids": targets,
         }
 
-    @property
-    def n_labels(self) -> int:
-        """
-        Returns the number of labels (tracks) in the dataset.
+    def _ensure_fasta_initialized(self):
+        if not getattr(self._thread_local, "fasta_initialized", False):
+            fasta = self.genome_dataset.fasta
+            self.genome_dataset.fasta = FastaInterval(
+                fasta_file=fasta.seqs.filename,
+                context_length=fasta.context_length,
+                return_seq_indices=fasta.return_seq_indices,
+                shift_augs=fasta.shift_augs,
+                rc_aug=fasta.rc_aug,
+            )
+            self._thread_local.fasta_initialized = True
 
-        Returns:
-            int: The number of tracks.
-        """
+    def _extract_data(self, coordinates):
+        signals = self._extract_from_bigwig(coordinates)
+        signal_array = np.array(signals, dtype=np.float32)
+        tensor = torch.from_numpy(signal_array)
+        tensor = torch.nan_to_num(tensor)
+        tensor = (
+            torch.nn.functional.avg_pool1d(tensor.unsqueeze(0), kernel_size=32, stride=32)
+            .squeeze(0) * 32
+        )
+        return self._scale_inplace(
+            tensor,
+            self.scaling_factors,
+            self.hard_clip,
+            self.soft_clip,
+            self.power_transform_exponent,
+        )
+
+    def _extract_from_bigwig(self, coordinates):
+        handles = self._get_bigwig_handles()
+        if handles is not None:
+            return [
+                handle.values(coordinates.chromosome, coordinates.start, coordinates.end)
+                for handle in handles
+            ]
+        else:
+            return [
+                pybigtools.open(str(path)).values(
+                    coordinates.chromosome, coordinates.start, coordinates.end
+                )
+                for path in self.bigwig_files
+            ]
+
+    def _get_bigwig_handles(self):
+        if not hasattr(self._thread_local, "bigwig_handles"):
+            if self.cache_bigwig_handles:
+                self._thread_local.bigwig_handles = [
+                    pybigtools.open(str(p)) for p in self.bigwig_files
+                ]
+            else:
+                self._thread_local.bigwig_handles = None
+        return self._thread_local.bigwig_handles
+
+    def _scale_inplace(self, x, scaling_factors, hard_clip, soft_clip, power_exponent):
+        scaling_factors = scaling_factors.unsqueeze(1)
+        power_exponent = power_exponent.unsqueeze(1)
+        soft_clip = soft_clip.unsqueeze(1)
+        hard_clip = hard_clip.unsqueeze(1)
+
+        x.mul_(scaling_factors)
+        x.add_(1).pow_(power_exponent).sub_(1)
+
+        mask = x > soft_clip
+        if mask.any():
+            excess = x - soft_clip + 1
+            clipped = torch.sqrt(excess) + soft_clip - 1
+            x = torch.where(mask, clipped, x)
+
+        x.clamp_(min=-hard_clip, max=hard_clip)
+        x.clamp_(min=self.min_value, max=self.max_value)
+        return x
+
+    def __del__(self):
+        if hasattr(self._thread_local, "bigwig_handles"):
+            for h in self._thread_local.bigwig_handles:
+                try:
+                    h.close()
+                except Exception:
+                    pass
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_thread_local", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._thread_local = threading.local()
+
+    @property
+    def n_labels(self):
         return len(self.bigwig_files)
 
     @property
-    def id2label(self) -> dict[int, str]:
-        """
-        Returns a mapping from track indices to track names.
-
-        Returns:
-            Dict[int, str]: A dictionary mapping track indices to track names.
-        """
-        return {
-            i: Path(bigwig_file).stem for i, bigwig_file in enumerate(self.bigwig_files)
-        }
+    def id2label(self):
+        return {i: Path(f).stem for i, f in enumerate(self.bigwig_files)}
 
     @property
-    def label2id(self) -> dict[str, int]:
-        """
-        Returns a mapping from track names to track indices.
-
-        Returns:
-            Dict[str, int]: A dictionary mapping track names to track indices.
-        """
+    def label2id(self):
         return {v: k for k, v in self.id2label.items()}
 
 
