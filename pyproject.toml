@@ -39,12 +39,12 @@ dependencies = [
     "torch>=2.0.0",
     "transformers>=4.30.0",
     "peft>=0.4.0",
-    "flash_attn>=2.0.0",
 
     # Genomics-specific packages
     "borzoi-pytorch",
     "enformer-pytorch",
     "pybigtools>=0.2.4",
+    "pyranges",
 
     # Data validation and modeling
     "pydantic>=2.0.0",
@@ -87,24 +87,7 @@ gpu = [
     "bitsandbytes>=0.41.0",
     "flash-attn>=2.0.0",
 ]
-training = [
-    # Additional packages for training scripts
-    "ray>=2.0.0",
-    "scikit-learn>=1.3.0",  # In case needed for evaluation metrics
-]
-audio = [
-    "librosa>=0.10.0",
-    "soundfile>=0.12.0",
-]
-vision = [
-    "pillow>=9.0.0",
-    "timm>=0.9.0",
-]
 
-# [project.scripts]
-# greyhound-train = "greyhound.cli:train"
-# greyhound-eval = "greyhound.cli:evaluate"
-# greyhound-config = "greyhound.cli:config"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/greyhound"
