@@ -104,7 +104,8 @@ def add_locon(model, rank=4, alpha=1.0, conv_select=None, ignore_layers=None, **
         **lora_kwargs,
         task_type=TaskType.FEATURE_EXTRACTION,
         bias="none",
-        modules_to_save=["chromatin_head"]
+        modules_to_save=["chromatin_head"],
+        lora_dropout=0.1
     )
     model = get_peft_model(model, lora_config)
     post_lora_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
