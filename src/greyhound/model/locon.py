@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from peft import LoraConfig, TaskType, get_peft_model
 import numpy as np
-
+from loguru import logger
 import torch.nn.functional as F
 
 class LoCon(nn.Module):
@@ -82,6 +82,8 @@ def add_locon(model, rank=4, alpha=1.0, conv_select=None, **lora_kwargs):
     Add LoRA to attention and LoCon to selected Conv1D layers in a PyTorch model.
     """
 
+    initial_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
     # Apply LoRA to attention layers
     lora_config = LoraConfig(
         **lora_kwargs,
@@ -91,6 +93,7 @@ def add_locon(model, rank=4, alpha=1.0, conv_select=None, **lora_kwargs):
         modules_to_save=["chromatin_head"]
     )
     model = get_peft_model(model, lora_config)
+    post_lora_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
 
     # Find all Conv1d layers
     conv_layers = [(name, module) for name, module in model.named_modules() if isinstance(module, nn.Conv1d)]
@@ -119,9 +122,13 @@ def add_locon(model, rank=4, alpha=1.0, conv_select=None, **lora_kwargs):
             param.requires_grad = True
 
     # Report trainable parameters
+    post_locon_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"params added/unfrozen by locon: {trainable_params}")
 
+    logger.info(f"Total parameters before LoRA and LoCon: {initial_params}")
+    logger.info(f"Number of parameters after LoRA: {post_lora_params}")
+    logger.info(f"Number of parameters after LoCon: {post_locon_params}")
+    logger.info(f"Total trainable parameters after LoRA and LoCon: {trainable_params}")
     return model
 
 
