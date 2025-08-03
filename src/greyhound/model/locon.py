@@ -102,7 +102,6 @@ def add_locon(model, rank=4, alpha=1.0, conv_select=None, ignore_layers=None, **
     # Apply LoRA to attention layers
     lora_config = LoraConfig(
         **lora_kwargs,
-        target_modules=r'.*to_q|.*to_v',
         task_type=TaskType.FEATURE_EXTRACTION,
         bias="none",
         modules_to_save=["chromatin_head"]
