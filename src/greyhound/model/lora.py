@@ -17,8 +17,8 @@ def create_lora_config() -> LoraConfig:
     
     config = LoraConfig(
         # Core LoRA parameters - optimized for genomics
-        r=128,                    # Balanced rank for expressivity vs efficiency
-        lora_alpha=256,          # 2x rank following best practices
+        r=8,                    # Balanced rank for expressivity vs efficiency
+        lora_alpha=16,          # 2x rank following best practices
         lora_dropout=0.1,       # Moderate dropout for regularization
         
         # Target modules - comprehensive coverage

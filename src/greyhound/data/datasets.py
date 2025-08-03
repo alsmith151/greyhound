@@ -588,7 +588,7 @@ class ChromatinDataset(Dataset):
         power_transform_exponent: float = 1.0,
         cache_bigwig_handles: bool = True,
         num_workers: int = 4,
-        dtype: torch.dtype = torch.float32,  # Use float32 by default for memory savings
+        dtype: torch.dtype = torch.float32,  # Use float32 by default
         pin_memory: bool = False,  # Allow pinned memory allocation
         prefetch_factor: int = 2,  # For DataLoader prefetching
     ) -> None:
@@ -857,24 +857,11 @@ class ChromatinDataset(Dataset):
 
         return x
 
-    def _extract_from_bigwig(self, coordinates) -> list:
-        """Extract BigWig data using cached handles for better performance."""
-        bigwig_handles = self._get_bigwig_handles()
-
-        if bigwig_handles is not None:
-            return [
-                handle.values(coordinates.chromosome, coordinates.start, coordinates.end)
-                for handle in bigwig_handles
-            ]
-        else:
-            # Use context manager for proper cleanup
-            results = []
-            for bigwig_file_path in self._bigwig_files_paths:
-                with pybigtools.open(bigwig_file_path) as handle:
-                    results.append(
-                        handle.values(coordinates.chromosome, coordinates.start, coordinates.end)
-                    )
-            return results
+    def _extract_from_bigwig(self, region):
+        return [
+            pybigtools.open(str(path)).values(region.chromosome, region.start, region.end)
+            for path in self.bigwig_files
+        ]
 
     def _extract_data(self, coordinates) -> torch.Tensor:
         """
