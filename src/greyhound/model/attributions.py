@@ -50,7 +50,7 @@ def gradient_x_input(
     return grad_x_input
 
 
-class LongBoiGenomicConverter:
+class GenomicConverter:
     """
     A class for converting LongBoi model outputs and attributions to genomic formats,
     particularly BEDGRAPH format, and handling genomic coordinate transformations.
@@ -68,7 +68,7 @@ class LongBoiGenomicConverter:
         self.default_bin_size = default_bin_size
 
     def predictions_to_bedgraph(
-        self, tensor: torch.Tensor, chrom: str, index: int, bin_size: int = None
+        self, tensor: torch.Tensor, index: int, bin_size: int = None
     ) -> pd.DataFrame:
         """
         Convert a tensor output from LongBoi to a DataFrame suitable for BEDGRAPH format.
@@ -86,13 +86,32 @@ class LongBoiGenomicConverter:
             bin_size = self.default_bin_size
 
         # Ensure tensor is on CPU and convert to numpy
-        tensor = tensor.cpu().numpy().squeeze()  # shape (1, N, L) -> (N, L)
+        tensor = tensor.cpu().detach().numpy().squeeze()  # shape (1, N, L) -> (N, L)
 
         # Get the start and end positions from the genome interval dataset
+        chrom = self.gid.df[index]["column_1"].item()
         roi_start = self.gid.df[index]["column_2"].item()
         roi_end = self.gid.df[index]["column_3"].item()
 
         bins = np.arange(roi_start, roi_end, bin_size)
+
+        # Ensure tensor matches the number of bins
+        if tensor.ndim > 1:
+            # If tensor is 2D (N, L), we need to reshape or select appropriate data
+            # For predictions, we typically want to flatten or select a specific track
+            tensor = tensor.flatten()
+
+        # Ensure the tensor length matches the number of bins
+        if len(tensor) != len(bins):
+            # If tensor is longer, truncate to match bins
+            if len(tensor) > len(bins):
+                tensor = tensor[:len(bins)]
+            # If tensor is shorter, this indicates a mismatch in expected data
+            else:
+                raise ValueError(
+                    f"Tensor length ({len(tensor)}) is shorter than number of bins ({len(bins)}). "
+                    f"Expected tensor to have at least {len(bins)} elements."
+                )
 
         df = pd.DataFrame(
             {
